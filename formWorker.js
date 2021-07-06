@@ -1,215 +1,201 @@
-class formWorker
-{
-    constructor(selector, options = {}) {
-        if(typeof selector !== 'string') {
-            throw "select type doesn't correct";
-				}
-        this.forms = document.querySelectorAll(selector);
-        this.fields = [];
-        this.listenEvents = options.listenEvents ? options.listenEvents : ['input', 'blur', 'change'];
-        this.options = Object.assign({
-					selector,
-					lastChangeElement: null,
-					storage: 'fields',
-       	}, options);
-        this.initFields();
-        this.initLink();
-        this.initEvent();
-   }
-   initEvent() {}
-   static documentReady(callback) {
-       if (document.readyState !== 'loading') {
-           callback();
-       } else if (document.addEventListener) {
-           document.addEventListener('DOMContentLoaded', () => callback());
-       } else {
-           document.attachEvent('onreadystatechange', () => {
-               if (document.readyState === 'complete') callback();
-           });
-       }
-	 }
-   changeSendField(parent = null) {
-       if(typeof parent === 'string') {
-           parent = document.querySelector(parent);
-       }
-       if(parent) {
-           for(const field of Object.values(this.fields)) {
-               field.send = field.elements.some(element => parent.contains(element));
-           }
-       }
-       return Object.values(this.fields).some(field => field.send);
-   }
-   getLink(input) {
-       switch (input.type) {
-           case "file": return input.elements[0].files; break;
-           case "checkbox": return input.elements[0].checked; break;
-           case "radio": return input.elements[0].dataset.value; break;
-           default: return input.elements[0].value; break;
-       }
-	}
-	setLink(value, input) {
-       for(const element of input.elements) {
-           switch (element.type) {
-               case "file": break;
-               case "checkbox":
-										element.checked = !!value;
-               break;
-               case "radio":
-                   element.dataset.value = value;
-                   element.checked = element.value == value;
-               break;
-               default: element.value = value; break;
-           }
-       }
-       let save = localStorage.getItem(this.options.storage);
-       save = save ? JSON.parse(save) : {};
-       save[input.name] = value;
-       localStorage.setItem(this.options.storage, JSON.stringify(save));
-	}
-  initLink() {
-        const set = (element, input) => {
-           let value = element.value;
-           if(!!input.update) {
-               let updateValue = input.update(value)
-               if(updateValue !== undefined) {
-                   value = updateValue;
-							 }
-           }
-           if('checkbox' === element.type) {
-               value = element.checked ? true : '';
-           }
-           input.value = value;
-				}
-        for(const inputKey in this.fields) {
-            const input = this.fields[inputKey];
-           Object.defineProperty(input, "value", {
-               get: () => this.getLink(input),
-               set: (value) => this.setLink(value, input),
-           });
-           for(const element of input.elements) {
-               element.addEventListener('updatevalue', () => set(element, input));
-               for(const event of this.listenEvents) {
-                   element.addEventListener(event, () => set(element, input));
-							 }
-					 }
-				}
-	 }
-   initFields() {
-       this.fields = [];
-       for(const form of this.forms) {
-           for(const input of form.querySelectorAll('input, select, textarea')) {
-               if(!input.name || input.hasAttribute('data-not-include')) {
-                   continue;
-							 }
-               if(!this.fields[input.name]) {
-                   this.fields[input.name] = {
-                       required: input.hasAttribute('required'),
-                       name: input.name,
-											 type: input.type,
-                  }
-							 }
-               if(!this.fields[input.name].elements) {
-                   this.fields[input.name].elements = [];
-							 }
-               this.fields[input.name].elements.push(input);
-					}
-			}
-	}
-	/*******************************/
-	isArray(arr) {
-       return Object.prototype.toString.call(arr) === "[object Array]";
-	}
-  isObject(obj) {
-       return Object.prototype.toString.call(obj) === "[object Object]";
-	}
-  /*******************************/
-
-  createdPathValueObject(obj, str = '', result = []) {
-		if(this.isObject(obj)) {
-		    for(const key in obj) {
-		        let inStr = str;
-		        const item = obj[key];
-            inStr += inStr ? '['.concat(key, ']') : key;
-            this.createdPathValueObject(item, inStr, result);
-				}
-		} else if(this.isArray(obj)) {
-        for(const itemKey in obj) {
-               const item = obj[itemKey];
-               if(this.isObject(item) || this.isArray(item)) {
-                   this.createdPathValueObject(item, str, result);
-							 } else {
-                   result.push({path: str ? str.concat('[]') : itemKey, value: item});
-							 }
-           }
-    } else {
-       result.push({path: str, value: obj});
+class formWorker {
+  forms = {};
+  constructor(options = {}) {
+    this.fields = null;
+    this.#setOptions(options);
+    const forms = this.#readSelector(this.options.selector);
+    this.#initForm(forms);
+    if (options.created !== undefined) options.created.call(this);
+    if (options.initEvent !== undefined) options.initEvent.call(this);
+  }
+  #setOptions(options) {
+    this.options = Object.assign(
+      {
+        indentifyPrefix: "form-default",
+        selectFields: ["input", "select", "textarea"],
+        listenEvents: ["input", "change", "blur"],
+        connection: false,
+        controls: {}, // questionable field
+      },
+      options
+    );
+    if (formWorker.#whatType(this.options.selectFields) === "array") {
+      this.options.selectFields = this.options.selectFields.join(", ");
     }
-		return result;
-	}
-	
-	createdFormDataByData(data) {
-			const j = this.createdPathValueObject(data);
-			const fromData = new FormData();
-			for(const item of j) {
-						 fromData.append(item.path, item.value);
-			}
-			return fromData;
-	}
+  }
+  #readSelector(selector) {
+    if (!selector) throw "select type is empty";
+    let forms = null;
+    this.forms = {};
+    switch (formWorker.#whatType(selector)) {
+      case "text":
+      case "string":
+        forms = Array.from(document.querySelectorAll(selector));
+        break;
+      case "dom":
+        forms = [selector];
+        break;
+      case "array":
+      case "nodelist":
+        forms = Array.from(selector);
+        break;
+      case "jquery":
+        forms = selector.toArray();
+        break;
+    }
+    if (!forms) throw "selecter is invalide";
+    return forms;
+  }
+  #initForm(forms) {
+    this.#setFormName(forms);
+    for (const index in forms) {
+      const form = forms[index];
+      this.forms[form.dataset.formName] = { form, key: form.dataset.formName };
+    }
+    this.#initFields();
+    this.#initLinkFieldsAndInput();
+  }
+  #setFormName(forms) {
+    for (const index in forms) {
+      const form = forms[index];
+      if (!form.dataset.formName) {
+        form.dataset.formName = this.options.indentifyPrefix + (+index + 1);
+      }
+    }
+  }
+  #setdarkValue(fieldKey, value, formList = null) {
+    const formsContainer = Object.values(this.forms).filter((i) => {
+      return formList ? formList.includes(i.key) : true;
+    });
+    for (const form of formsContainer) {
+      if (form.fields[fieldKey]) {
+        const field = form.fields[fieldKey];
+        if (field.beforeUpdate !== undefined) {
+          value = field.beforeUpdate.call(field, value, form);
+        }
+        field.darkValue = value;
+        if (field.afterUpdate !== undefined) {
+          field.afterUpdate.call(field, value, form);
+        }
+      }
+    }
+  }
+  #setLink(value, field, form) {
+    let selector = `[data-form-name="${form.key}"] [name=${field.name}]`;
+    const connectionType = formWorker.#whatType(this.options.connection);
+    if (field.beforeUpdate !== undefined) {
+      value = field.beforeUpdate.call(field, value, form);
+    }
+    field.darkValue = value;
+    if (field.afterUpdate !== undefined) {
+      field.afterUpdate.call(field, value, form);
+    }
+    if (this.options.connection) {
+      if (connectionType === "boolean") {
+        selector = `[name=${field.name}]`;
+        this.#setdarkValue(field.name, value);
+      } else if (connectionType === "object") {
+        if (this.options.connection[form.key] !== undefined) {
+          const connection = this.options.connection[form.key];
+          if (formWorker.#whatType(connection) === "array") {
+            this.#setdarkValue(field.name, value, connection);
+            for (const formName of connection) {
+              selector += `, [data-form-name="${formName}"] [name=${field.name}]`;
+            }
+          } else if (formWorker.#whatType(connection) === "object") {
+            for (const formName in connection) {
+              const fields = connection[formName];
+              if (fields.includes(field.name)) {
+                this.#setdarkValue(field.name, value, formName);
+                selector += `, [data-form-name="${formName}"] [name=${field.name}]`;
+              }
+            }
+          }
+        }
+      }
+    }
+    for (const input of document.querySelectorAll(selector)) {
+      switch (input.type) {
+        case "file":
+          break;
+        case "checkbox":
+          input.checked = !!value;
+          break;
+        case "radio":
+          input.dataset.value = value;
+          input.checked = input.value == value;
+          break;
+        default:
+          input.value = value;
+          break;
+      }
+    }
+  }
+  #initLinkFieldsAndInput() {
+    Object.values(this.forms).forEach((form) => {
+      for (const field of Object.values(form.fields)) {
+        Object.defineProperty(field, "value", {
+          get: () => field.darkValue,
+          set: (value) => this.#setLink(value, field, form),
+        });
+        field.value = "war";
+      }
+    });
+  }
+  #initFields() {
+    Object.values(this.forms).forEach((form) => {
+      form.fields = [];
+      for (const input of form.form.querySelectorAll(
+        this.options.selectFields
+      )) {
+        if (!input.name || input.hasAttribute("data-dont-include")) continue;
+        if (!form.fields[input.name]) {
+          form.fields[input.name] = {
+            name: input.name,
+            darkValue: null,
+          };
+        }
+        if (input.hasAttribute("required")) {
+          form.fields[input.name].required = true;
+        }
+        for (const event of this.options.listenEvents) {
+          input.addEventListener(event, function () {
+            form.fields[input.name].value = this.value;
+          });
+        }
+      }
+    });
+  }
+  static #whatType(item) {
+    if (formWorker.#isDom(item)) return "dom";
+    let type = toString.call(item).split(" ").pop().slice(0, -1).toLowerCase();
+    if (type === "object" && item.jquery) type = "jquery";
+    return type;
+  }
+  static #isDom(e) {
+    return e.nodeType ? [Node.ELEMENT_NODE].indexOf(e.nodeType) !== -1 : false;
+  }
 }
-
-class authForm extends formWorker
-{
-	constructor(selector) {
-       super(selector);
-       let save = localStorage.getItem(this.options.storage);
-       save = save ? JSON.parse(save) : {};
-       for(const key in save) {
-           const value = save[key];
-           this.fields[key].value = value;
-       }
-   }
-   check() {
-       const error = {message: [], errorFields: []}
-       for(const field of Object.values(this.fields)) {
-           if(field.send && field.required && !field.value) {
-               error.message.push('Обязательное поле '.concat(field.name, ' не заполнено'));
-               error.errorFields.push(field.name);
-           }
-       }
-       return error.errorFields.length ? error : true;
-   }
-   send(url = '', data) {
-       data = this.createdFormDataByData(data);
-       fetch(url, {
-           method: 'POST',
-           cache: 'no-cache',
-           body: data,//formData,
-       }).then(request => {
-           return request.json();
-       }).then(request => {
-           if(request.isSuccess) {
-               
-           }
-       });
-   }
-   initEvent() {
-	    for(const form of this.forms) {
-           form.querySelector('.button').addEventListener('click', (e) => {
-               this.changeSendField(form);
-               const check = this.check();
-               if(check !== true) {
-					throw 'error from field';
-				}
-               let data = {};
-               for(const field of Object.values(this.fields)) {
-                   if(data.send === undefined || data.send === true) {
-                       data[field.name] = field.value;
-					}
-				}
-
-               this.send('/ajax/?act=User.LoginUser', [1, 2, 3, 4, { f: { c: 2, n: { m: 1 } }, v: 2 }]);
-			});
-		}
-	}
-}
-formWorker.documentReady(() => new authForm('.login-form'));
+(() => {
+  const helper = {
+    ajax() {
+      console.log(3123123123);
+    },
+  };
+  for (const fName in Object.keys(helper)) {
+    formWorker[fName] = helper[fName];
+  }
+})();
+(() =>
+  new formWorker({
+    selector: document.querySelectorAll("form"),
+    connection: {
+      "form-default1": { "form-default2": ["m"], "form-default4": ["j"] },
+      "form-default2": ["form-default1"],
+    },
+    created() {
+      formWorker.ajax();
+      const formDefault1 = this.forms["form-default1"];
+      formDefault1.fields.m.afterUpdate = function (value, form) {};
+    },
+  }))();
