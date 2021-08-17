@@ -3,12 +3,52 @@ class formWorker {
   lastEventType = ''
   constructor(options = {}) {
     this.fields = null
+    this.forms = null
+
     this.#setOptions(options)
     const forms = this.#readSelector(this.options.selector)
     this.#initForm(forms)
-    if (options.created !== undefined) options.created.call(this)
-    if (options.initEvent !== undefined) options.initEvent.call(this)
+
+    if ('created' in options && formWorker.isFunction(options.created)) options.created.call(this)
+    if ('initEvent' in options && formWorker.isFunction(options.initEvent)) options.initEvent.call(this)
+    if ('reinitFormInChange' in options && options.reinitFormInChange) {
+      this.#reinitFormInChange()
+    }
   }
+  /*
+   * Создает событие прослушивающее изменение детей контенера формы
+   */
+  #reinitFormInChange() {
+    const mutationObserverForm = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        const form = this.forms[mutation.target.dataset.formName]
+        if (form !== undefined) {
+          let reinitLink = form.fields === undefined
+          this.#initFields(form)
+          if (reinitLink) {
+            this.#initLinkFieldsAndInput(form)
+          }
+          for (const field in form.fields) {
+            form.fields[field].value = form.fields[field].value
+          }
+        } else {
+          console.info('Форма не найдена')
+        }
+      })
+    })
+    for (const formContainer of Object.values(this.forms)) {
+      const form = formContainer.form
+      mutationObserverForm.observe(form, {
+        attributes: false,
+        characterData: true,
+        childList: true,
+        subtree: true,
+        attributeOldValue: false,
+        characterDataOldValue: true
+      })
+    }
+  }
+
   #setOptions(options) {
     this.options = Object.assign(
       {
@@ -20,6 +60,10 @@ class formWorker {
           radio: ['change'],
           textarea: ['input'],
           file: ['change']
+        },
+        skipFildSelector: {
+          selector: 'data-dont-include',
+          type: 'data'
         },
         connection: false,
         controls: {} // questionable field
@@ -33,7 +77,6 @@ class formWorker {
   #readSelector(selector) {
     if (!selector) throw 'select type is empty'
     let forms = null
-    this.forms = {}
     switch (formWorker.whatType(selector)) {
       case 'text':
       case 'string':
@@ -53,7 +96,11 @@ class formWorker {
     if (!forms) throw 'selecter is invalide'
     return forms
   }
+  /*
+   * Создает в контенере яцейку переденного блока/селектора для дольнейшей работы с ней
+   */
   #initForm(forms) {
+    this.forms = {}
     this.#setFormName(forms)
     for (const index in forms) {
       const form = forms[index]
@@ -62,6 +109,9 @@ class formWorker {
     this.#initFields()
     this.#initLinkFieldsAndInput()
   }
+  /*
+   * Задает data аттрибут для блока, для его идентификации в последующем
+   */
   #setFormName(forms) {
     for (const index in forms) {
       const form = forms[index]
@@ -87,46 +137,76 @@ class formWorker {
       }
     }
   }
-  #setLink(value, field, form) {
-    let selector = `[data-form-name="${form.key}"] [name=${field.name}]`
-    if (field.beforeUpdate !== undefined) {
-      value = field.beforeUpdate.call(field, value, form)
-    }
-    field.darkValue = value
-    if (field.afterUpdate !== undefined) {
-      field.afterUpdate.call(field, value, form)
-    }
+  #setValueOrGetSelectorConnectionForm(fieldName, formKey, value = null) {
+    let selector = `[data-form-name="${formKey}"] [name=${fieldName}]`
     if (this.options.connection) {
       if (formWorker.isBoolean(this.options.connection)) {
-        selector = `[name=${field.name}]`
-        this.#setdarkValue(field.name, value)
+        selector = `[name=${fieldName}]`
+        if (value) {
+          this.#setdarkValue(fieldName, value)
+        }
       } else if (formWorker.isObject(this.options.connection)) {
-        if (this.options.connection[form.key] !== undefined) {
-          const connection = this.options.connection[form.key]
+        if (this.options.connection[formKey] !== undefined) {
+          const connection = this.options.connection[formKey]
           if (formWorker.isArray(connection)) {
-            this.#setdarkValue(field.name, value, connection)
+            if (value) {
+              this.#setdarkValue(fieldName, value, connection)
+            }
             for (const formName of connection) {
-              selector += `, [data-form-name="${formName}"] [name=${field.name}]`
+              selector += `, [data-form-name="${formName}"] [name=${fieldName}]`
             }
           } else if (formWorker.isObject(connection)) {
             for (const formName in connection) {
               const fields = connection[formName]
-              if (fields.includes(field.name)) {
-                this.#setdarkValue(field.name, value, formName)
-                selector += `, [data-form-name="${formName}"] [name=${field.name}]`
+              if (fields.includes(fieldName)) {
+                if (value) {
+                  this.#setdarkValue(fieldName, value, formName)
+                }
+                selector += `, [data-form-name="${formName}"] [name=${fieldName}]`
               }
             }
           }
         }
       }
     }
+    return selector
+  }
+  #setLink(value, field, form) {
+    const selector = this.#setValueOrGetSelectorConnectionForm(field.name, form.key)
     const checkbox = []
     for (const input of document.querySelectorAll(selector)) {
       switch (input.type) {
-        case 'file':
-          break
         case 'checkbox':
           checkbox.push(input)
+          break
+      }
+    }
+
+    if (checkbox.length) {
+      const checkedValue = []
+      for (const input of checkbox) {
+        if (this.lastEventType === 'checkbox' && input.value === value) {
+          input.checked = !input.checked
+        } else if (this.lastEventType !== 'checkbox') {
+          input.checked =
+            value
+              .split(',')
+              .map((i) => i.trim())
+              .indexOf(input.value) !== -1
+        }
+        if (input.checked) {
+          checkedValue.push(input.value)
+        }
+      }
+      if (this.lastEventType === 'checkbox') {
+        value = checkedValue.join(',')
+      }
+    }
+
+    for (const input of document.querySelectorAll(selector)) {
+      switch (input.type) {
+        case 'checkbox':
+        case 'file':
           break
         case 'radio':
           input.dataset.value = value
@@ -137,38 +217,48 @@ class formWorker {
           break
       }
     }
-    console.log(this.lastEventType)
-    if (checkbox.length) {
-      const checkedValue = []
-      for (const input of checkbox) {
-        if (input.value === value) {
-          input.checked = !input.checked
-        }
-        if (input.checked) {
-          checkedValue.push(input.value)
-        }
-      }
-      field.darkValue = checkedValue.join(', ')
-      this.#setdarkValue(field.name, field.darkValue)
+
+    if (field.beforeUpdate !== undefined) {
+      value = field.beforeUpdate.call(field, value, form)
+    }
+
+    this.#setValueOrGetSelectorConnectionForm(field.name, form.key, value)
+    field.darkValue = value
+
+    if (field.afterUpdate !== undefined) {
+      field.afterUpdate.call(field, value, form)
     }
   }
-  #initLinkFieldsAndInput() {
-    Object.values(this.forms).forEach((form) => {
+  #initLinkFieldsAndInput(container = null) {
+    ;(container !== null ? [container] : Object.values(this.forms)).forEach((form) => {
       for (const field of Object.values(form.fields)) {
         Object.defineProperty(field, 'value', {
           get: () => field.darkValue,
           set: (value) => this.#setLink(value, field, form)
         })
-        field.value = 'war'
       }
     })
   }
-  #initFields() {
+  #initFields(container = null) {
     const _this = this
-    Object.values(this.forms).forEach((form) => {
-      form.fields = []
+    ;(container !== null ? [container] : Object.values(this.forms)).forEach((form) => {
+      if (container === null || form.fields === undefined) {
+        form.fields = []
+      }
       for (const input of form.form.querySelectorAll(this.options.selectFields)) {
-        if (!input.name || input.hasAttribute('data-dont-include')) continue
+        let skip = false
+
+        switch (this.options.skipFildSelector.type) {
+          case 'data':
+            skip = input.hasAttribute(this.options.skipFildSelector.selector)
+            break
+          case 'class':
+            skip = input.classList.contains(this.options.skipFildSelector.selector)
+            break
+        }
+
+        if (!input.name || skip) continue
+
         if (!form.fields[input.name]) {
           form.fields[input.name] = {
             name: input.name,
@@ -194,9 +284,7 @@ class formWorker {
       cache: 'no-cache',
       body: data //formData,
     })
-      .then((request) => {
-        return request.json()
-      })
+      .then((request) => request.json())
       .then((request) => {
         if (request.isSuccess) {
         }
@@ -213,6 +301,9 @@ class formWorker {
     },
     isDom(e) {
       return e.nodeType ? [Node.ELEMENT_NODE].indexOf(e.nodeType) !== -1 : false
+    },
+    isFunction(i) {
+      return formWorker.whatType(i) === 'function'
     },
     isArray(i) {
       return formWorker.whatType(i) === 'array'
@@ -234,12 +325,18 @@ class formWorker {
         })
       }
     },
-    createdPathValueObject(obj, str = '', result = []) {
+    /*
+     * Создает карту обьекта для использования в formData
+     * Пример:
+     * Обьект: { a: 1, b: 2, c: { d: 54 } }
+     * будет преобразован в { 0: {path: "a", value: 1}, 1: {path: "b", value: 2}, 2: {path: "c[d]", value: 54} }
+     */
+    createdPathValueObject(obj, str = '', result = [], left = '[', rigth = ']') {
       if (this.isObject(obj)) {
         for (const key in obj) {
           let inStr = str
           const item = obj[key]
-          inStr += inStr ? '['.concat(key, ']') : key
+          inStr += inStr ? left.concat(key, rigth) : key
           formWorker.createdPathValueObject(item, inStr, result)
         }
       } else if (this.isArray(obj)) {
@@ -273,19 +370,18 @@ class formWorker {
   }
 })()
 formWorker.documentReady(() => {
-  console.log('pageReady')
   return new formWorker({
     selector: document.querySelectorAll('form'),
-    connection: {
-      'form-default1': { 'form-default2': ['m'], 'form-default4': ['j'] },
-      'form-default2': ['form-default1']
-    },
-    // connection: true,
+    // connection: {
+    //   'form-default1': { 'form-default2': ['m'], 'form-default4': ['j'] },
+    //   'form-default2': ['form-default1']
+    // },
+    connection: true,
+    reinitFormInChange: true,
     created() {
       const formDefault1 = this.forms['form-default1']
       formDefault1.fields.m.value = '123123'
       formDefault1.fields.m.afterUpdate = function (value, form) {}
-      console.log(this.forms)
     }
   })
 })
