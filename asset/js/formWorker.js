@@ -16,9 +16,6 @@ class formWorker {
         this.#reinitFormInChange()
       }
     }
-    readSelectorPulick() {
-        console.log('readSelectorPulick');
-    }
     /*
      * Создает событие прослушивающее изменение детей контенера формы
      */
@@ -146,6 +143,12 @@ class formWorker {
       if (this.options.connection) {
         if (formWorker.isBoolean(this.options.connection)) {
           selector = `[name=${fieldName}]`
+          selector = Object.values(this.forms).reduce((accum, item) => {
+            console.log(item);
+            const s = `[data-form-name="${item.key}"] ${selector}`
+            return accum ? `${accum}, ${s}` : `${s}`
+          }, '')
+          console.log(selector);
           if (value) {
             this.#setdarkValue(fieldName, value)
           }
