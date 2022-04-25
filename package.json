@@ -9,5 +9,8 @@
   },
   "devDependencies": {
     "vite": "^2.9.5"
+  },
+  "dependencies": {
+    "inputmask": "^5.0.7"
   }
 }
