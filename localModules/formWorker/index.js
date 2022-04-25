@@ -1,4 +1,4 @@
-import Helper from "@jsRoot/formWorker/Helper";
+import Helper from "./lib/Helper";
 class formWorker {
     forms = {}
     lastEventType = ''

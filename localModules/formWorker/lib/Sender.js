@@ -1,4 +1,4 @@
-import Helper from "@jsRoot/formWorker/Helper";
+import Helper from "./Helper";
 const send = (url = '', data) => {
   data = Helper.createdFormDataByData(data)
   fetch(url, {

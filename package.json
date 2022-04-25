@@ -11,6 +11,7 @@
     "vite": "^2.9.5"
   },
   "dependencies": {
+    "formWorker": "file:localModules/formWorker",
     "inputmask": "^5.0.7"
   }
 }

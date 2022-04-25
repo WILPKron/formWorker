@@ -1,4 +1,4 @@
-import formWorker from './asset/js/formWorker'
+import formWorker from 'formWorker'
 
 formWorker.documentReady(() => {
   const formController = new formWorker({
