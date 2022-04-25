@@ -144,11 +144,9 @@ class formWorker {
         if (formWorker.isBoolean(this.options.connection)) {
           selector = `[name=${fieldName}]`
           selector = Object.values(this.forms).reduce((accum, item) => {
-            console.log(item);
             const s = `[data-form-name="${item.key}"] ${selector}`
             return accum ? `${accum}, ${s}` : `${s}`
           }, '')
-          console.log(selector);
           if (value) {
             this.#setdarkValue(fieldName, value)
           }
@@ -290,5 +288,5 @@ class formWorker {
   for (const fName of Object.keys(Helper)) {
     formWorker[fName] = Helper[fName]
   }
-
+  console.log('init project');
   export default formWorker
